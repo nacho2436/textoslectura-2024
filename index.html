@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Lector de Texto a Voz</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        textarea, #texto-resaltado {
+            width: 100%;
+            margin-bottom: 10px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            resize: vertical;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .resaltado {
+            color: blue;
+        }
+        .slider-container {
+            margin-top: 10px;
+        }
+        #velocidad, .size-slider {
+            width: 100%;
+        }
+        #rsvp-container {
+            width: 100%;
+            height: 100px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 10px;
+            font-size: 24px;
+            background-color: white;
+            color: black;
+            position: relative;
+            overflow: hidden;
+        }
+        #rsvp-word {
+            position: relative;
+        }
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+            .container {
+                padding: 10px;
+            }
+            button {
+                width: 100%;
+                margin: 5px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Lector de Texto a Voz</h1>
+        <textarea id="texto" placeholder="Ingrese el texto que desea escuchar..." rows="5"></textarea>
+        <br>
+        <button id="leerBtn">Leer Texto</button>
+        <button id="detenerBtn">Detener</button>
+        <div class="slider-container">
+            <label for="velocidad">Velocidad de lectura: <span id="valor-velocidad">1x</span></label>
+            <input type="range" id="velocidad" min="0.5" max="2" step="0.1" value="1">
+        </div>
+        <div class="slider-container">
+            <label for="texto-size">Tamaño del texto: <span id="valor-texto-size">16px</span></label>
+            <input type="range" id="texto-size" class="size-slider" min="12" max="24" value="16">
+        </div>
+        <div id="texto-resaltado"></div>
+        <div class="slider-container">
+            <label for="rsvp-size">Tamaño del RSVP: <span id="valor-rsvp-size">24px</span></label>
+            <input type="range" id="rsvp-size" class="size-slider" min="16" max="48" value="24">
+        </div>
+        <div id="rsvp-container">
+            <div id="rsvp-word"></div>
+        </div>
+    </div>
+
+    <script>
+        let utterance;
+        let textoArray;
+        let indiceActual;
+        let palabrasArray;
+        let indicePalabra;
+        let tiemposPalabras = [];
+        let estaLeyendo = false;
+
+        // Verificar soporte de síntesis de voz
+        if ('speechSynthesis' in window) {
+            console.log("La síntesis de voz es compatible con este navegador.");
+        } else {
+            console.log("Lo siento, la síntesis de voz no es compatible con este navegador.");
+            alert("Lo siento, la síntesis de voz no es compatible con este navegador.");
+        }
+
+        function leerTexto() {
+            const texto = document.getElementById('texto').value;
+            if (texto && !estaLeyendo) {
+                estaLeyendo = true;
+                detenerLectura(); // Detener cualquier lectura en curso
+                
+                textoArray = texto.split('');
+                palabrasArray = texto.match(/\S+\s*/g) || [];
+                indiceActual = 0;
+                indicePalabra = 0;
+                
+                const textoResaltadoDiv = document.getElementById('texto-resaltado');
+                textoResaltadoDiv.innerHTML = textoArray.map(char => `<span>${char}</span>`).join('');
+                
+                utterance = new SpeechSynthesisUtterance(texto);
+                utterance.lang = 'es-ES';
+                utterance.rate = parseFloat(document.getElementById('velocidad').value);
+                
+                // Calcular los tiempos de inicio de cada palabra
+                let tiempoAcumulado = 0;
+                tiemposPalabras = palabrasArray.map(palabra => {
+                    const tiempoInicio = tiempoAcumulado;
+                    tiempoAcumulado += palabra.length * (60 / utterance.rate) / 5; // Ajuste aproximado
+                    return tiempoInicio;
+                });
+                
+                utterance.onboundary = function(event) {
+                    if (event.name === 'word') {
+                        resaltarHastaIndice(event.charIndex);
+                        actualizarRSVP(event.charIndex);
+                    }
+                };
+                
+                utterance.onend = function() {
+                    resaltarHastaIndice(texto.length);
+                    document.getElementById('rsvp-word').innerHTML = '';
+                    estaLeyendo = false;
+                };
+                
+                utterance.onerror = function(event) {
+                    console.error('Error en la síntesis de voz:', event);
+                    alert('Ocurrió un error durante la lectura. Por favor, intente nuevamente.');
+                    estaLeyendo = false;
+                };
+                
+                window.speechSynthesis.speak(utterance);
+            } else if (!texto) {
+                alert('Por favor, ingrese algún texto para leer.');
+            }
+        }
+
+        function resaltarHastaIndice(indice) {
+            const spans = document.getElementById('texto-resaltado').getElementsByTagName('span');
+            for (let i = indiceActual; i < indice && i < spans.length; i++) {
+                spans[i].classList.add('resaltado');
+            }
+            indiceActual = indice;
+        }
+
+        function actualizarRSVP(indice) {
+            const palabraIndex = tiemposPalabras.findIndex(tiempo => tiempo >= indice / textoArray.length * tiemposPalabras[tiemposPalabras.length - 1]);
+            if (palabraIndex !== -1) {
+                const palabra = palabrasArray[palabraIndex].trim();
+                const puntoFocal = Math.floor(palabra.length / 2);
+                let html = '';
+                for (let i = 0; i < palabra.length; i++) {
+                    if (i === puntoFocal) {
+                        html += `<span style="color: orange;">${palabra[i]}</span>`;
+                    } else {
+                        html += `<span>${palabra[i]}</span>`;
+                    }
+                }
+                document.getElementById('rsvp-word').innerHTML = html;
+            }
+        }
+
+        function detenerLectura() {
+            window.speechSynthesis.cancel();
+            document.getElementById('rsvp-word').innerHTML = '';
+            estaLeyendo = false;
+        }
+
+        // Event Listeners
+        document.getElementById('leerBtn').addEventListener('click', leerTexto);
+        document.getElementById('detenerBtn').addEventListener('click', detenerLectura);
+
+        document.getElementById('velocidad').addEventListener('input', function(e) {
+            const velocidad = parseFloat(e.target.value);
+            document.getElementById('valor-velocidad').textContent = velocidad.toFixed(1) + 'x';
+            if (utterance) {
+                utterance.rate = velocidad;
+            }
+        });
+
+        document.getElementById('texto-size').addEventListener('input', function(e) {
+            const size = e.target.value;
+            document.getElementById('texto').style.fontSize = `${size}px`;
+            document.getElementById('texto-resaltado').style.fontSize = `${size}px`;
+            document.getElementById('valor-texto-size').textContent = `${size}px`;
+        });
+
+        document.getElementById('rsvp-size').addEventListener('input', function(e) {
+            const size = e.target.value;
+            document.getElementById('rsvp-container').style.fontSize = `${size}px`;
+            document.getElementById('valor-rsvp-size').textContent = `${size}px`;
+        });
+
+        // Prevenir zoom en dispositivos móviles
+        document.addEventListener('gesturestart', function(e) {
+            e.preventDefault();
+        });
+    </script>
+</body>
+</html>
